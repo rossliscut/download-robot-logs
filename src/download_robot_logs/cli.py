@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from download_robot_logs.download import download_package
+from download_robot_logs.select import TIME_FMT
 
 
 def _parse_time(value: str) -> datetime:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 RBK = "/usr/local/etc/.SeerRobotics/rbk/resources/"
 LOG_DIR = "/usr/local/etc/.SeerRobotics/rbk/diagnosis/log"
@@ -80,23 +80,34 @@ def filter_rotated(
     window_end: datetime,
     download_time: datetime,
 ) -> list[str]:
-    """Keep rotated logs whose filename time falls in the package window.
+    """Keep rotated logs that cover the package window.
 
-    The previous segment often stays open until a few seconds after the new
-    robokit log starts. Treating that as overlap would pull in the whole
-    previous file, including overnight patlogs.
+    A file's segment runs from the timestamp in its name until the next file
+    in the same series, or until download_time when it is the newest. The
+    previous segment is skipped when it only sticks into the window for under
+    a minute. That avoids downloading an overnight patlog that closed a few
+    seconds after the new robokit log started.
     """
-    del download_time
+    grouped: dict[str, list[tuple[datetime, str]]] = {}
     kept: list[str] = []
     for rel in rels:
         if not rel.startswith("log/"):
             kept.append(rel)
             continue
         start = parse_stamp(rel)
-        if start is None or series_key(rel) is None:
+        key = series_key(rel)
+        if start is None or key is None:
             kept.append(rel)
             continue
-        if window_start <= start < window_end:
+        grouped.setdefault(key, []).append((start, rel))
+    for group in grouped.values():
+        group.sort()
+        for index, (start, rel) in enumerate(group):
+            end = group[index + 1][0] if index + 1 < len(group) else download_time
+            if end <= window_start or start >= window_end:
+                continue
+            if start < window_start and (end - window_start) < timedelta(minutes=1):
+                continue
             kept.append(rel)
     return kept
 
