@@ -83,6 +83,14 @@ class LayoutTest(unittest.TestCase):
         self.assertTrue(map_wanted("20260923133437402-3D.2dlh", stems))
         self.assertFalse(map_wanted("Exol3Dpoints_13August_V1.smap", stems))
 
+    def test_warning_path_names_current_map_without_load_line(self) -> None:
+        text = (
+            "[smap][256|map not found|/usr/local/etc/.SeerRobotics/rbk///"
+            "private/shared/maps/Exol3Dpoints_18September_RemoveDeadEnd/0.feature2d]"
+        )
+        stems = loaded_map_stems(text)
+        self.assertEqual(stems, {"Exol3Dpoints_18September_RemoveDeadEnd"})
+
 
 if __name__ == "__main__":
     unittest.main()

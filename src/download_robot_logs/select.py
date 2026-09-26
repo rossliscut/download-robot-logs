@@ -15,7 +15,7 @@ STAMP = re.compile(r"(20\d{2})-(\d{2})-(\d{2})[_-](\d{2})-(\d{2})-(\d{2})")
 SMAP144 = re.compile(r"\[smap\]\[144\|([^\]|]+)")
 CURRENT = re.compile(r"_currentMap\|([^\s|\]]+)")
 SUCCESS = re.compile(r"\[smap\]\[644\|(\S+) success")
-MAP_PATH = re.compile(r"resources/maps/(?:tmp/)?([^/\s|\]]+)")
+MAP_PATH = re.compile(r"/maps/(?:tmp/)?([^/\s|\]\"']+)")
 TIME_FMT = "%Y-%m-%d %H:%M:%S"
 
 
@@ -115,17 +115,19 @@ def filter_rotated(
 def loaded_map_stems(text: str) -> set[str]:
     stems: set[str] = set()
     for line in text.splitlines():
-        if "[addMapMD5]" in line:
+        if "[addMapMD5]" in line or "uploadMap" in line:
             continue
         blobs = SMAP144.findall(line) + CURRENT.findall(line) + SUCCESS.findall(line)
-        if "[smap]" in line:
-            blobs += MAP_PATH.findall(line)
+        blobs += MAP_PATH.findall(line)
         for raw in blobs:
             name = raw.strip().rsplit("/", 1)[-1]
             for suffix in (".smap", ".2dlh"):
                 if name.endswith(suffix):
                     name = name[: -len(suffix)]
                     break
+            else:
+                if "." in name:
+                    continue
             if name and name not in {"0", "tmp"}:
                 stems.add(name)
     return stems

@@ -25,6 +25,18 @@ def _log(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
 
 
+def _is_map_source(rel: str) -> bool:
+    """Plain logs that name the map in use, including a segment that did not reload it."""
+    name = rel.rsplit("/", 1)[-1]
+    if not name.endswith(".log"):
+        return False
+    if rel.count("/") == 1 and name.startswith("robokit_") and not name.startswith(
+        ("robokit_warning_", "robokit_error_")
+    ):
+        return True
+    return rel.startswith(("log/warning/", "log/error/"))
+
+
 def _json_call(client: RobodClient, api: int, body: dict, timeout: float) -> tuple[int, bytes]:
     payload = json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return client.call(api, payload, timeout)
@@ -184,13 +196,7 @@ def download_package(
         rels = [rel for rel, _full in jobs]
         allowed = set(filter_rotated(rels, window_start, window_end, download_time))
         jobs = [(rel, full) for rel, full in jobs if rel in allowed]
-        robokit = [
-            item
-            for item in jobs
-            if item[0].startswith("log/robokit_")
-            and item[0].count("/") == 1
-            and item[0].endswith(".log")
-        ]
+        robokit = [item for item in jobs if _is_map_source(item[0])]
         maps = [item for item in jobs if item[0].startswith("maps/")]
         rest = [item for item in jobs if item not in robokit and item not in maps]
         _log(f"window {format_time(window_start)} -> {format_time(window_end)}")
@@ -209,7 +215,7 @@ def download_package(
             _log(f"maps keep {len(chosen)} skip {len(maps) - len(chosen)}")
             run_batch(client, root, chosen, "map", failed)
         else:
-            _log("no loaded map in robokit log, skip maps/")
+            _log("no current map named in robokit, warning, or error logs; skip maps/")
         run_batch(client, root, rest, "file", failed)
         count = write_zip(root, output)
     finally:

@@ -163,24 +163,24 @@ Download `robokit_*.log` before `maps/`. Read those logs, then download only the
 
 `maps/` 是包里最大的一块（这台机器人上原始大约 810 MB、37 个文件）。不要整目录都下。
 
-After the plain-text `robokit_*.log` files are on disk, scan every downloaded segment. A map was used only when the log shows it was loaded. Collect the stem (the file name without `.smap` or `.2dlh`):
+After the plain-text `robokit_*.log`, `log/warning/*.log`, and `log/error/*.log` files are on disk, scan every one of them. The current map is named even when this segment has no load line. Collect the stem (the file name without `.smap` or `.2dlh`):
 
-`robokit_*.log` 下到本地后，把每个已下载的分段都扫一遍。只有日志写明加载过的地图才算用过。记下主干名（去掉 `.smap` 或 `.2dlh`）：
+`robokit_*.log`、`log/warning/*.log`、`log/error/*.log` 都下到本地后全部扫一遍。这段日志没有重新加载地图时，里面仍然会写出当前地图。记下主干名（去掉 `.smap` 或 `.2dlh`）：
 
 | Line / 日志行 | Example / 例子 | Stem / 主干名 |
 |---------------|----------------|---------------|
 | `[smap][144\|<stem>]` | `[smap][144\|20260923133437402-3D]` | `20260923133437402-3D` |
 | `_currentMap\|<stem>` | `_currentMap\|20260923133437402-3D` | `20260923133437402-3D` |
 | `[smap][644\|<stem> success` | `[smap][644\|20260923133437402-3D success, md5: ...]` | `20260923133437402-3D` |
-| `[smap]` line with `resources/maps/<file>` | `.../maps/20260923133437402-3D.smap` | `20260923133437402-3D` |
+| any `/maps/<stem>.smap` or `/maps/<stem>/...` | `.../maps/Exol3Dpoints_18September_RemoveDeadEnd/0.feature2d` | `Exol3Dpoints_18September_RemoveDeadEnd` |
 
-From the 5130 list, download each `maps/` file whose name is `<stem>.smap`, `<stem>.2dlh`, or `<stem>.<other>`. A loaded map uses both the `.smap` and the `.2dlh`. On 2026-09-26 this log loaded only `20260923133437402-3D`, so the download is `20260923133437402-3D.smap` and `20260923133437402-3D.2dlh`.
+From the 5130 list, download each `maps/` file whose name is `<stem>.smap`, `<stem>.2dlh`, or `<stem>.<other>`. A map in use has both the `.smap` and the `.2dlh`. On 7043 the 14:56 robokit segment had no load line; the warning log named `Exol3Dpoints_18September_RemoveDeadEnd`.
 
-在 5130 的清单里，下载文件名是 `<主干名>.smap`、`<主干名>.2dlh` 或其他 `<主干名>.<后缀>` 的 `maps/` 文件。一张加载过的地图要同时下 `.smap` 和 `.2dlh`。2026-09-26 这份日志只加载了 `20260923133437402-3D`，所以只下 `20260923133437402-3D.smap` 和 `20260923133437402-3D.2dlh`。
+在 5130 的清单里，下载文件名是 `<主干名>.smap`、`<主干名>.2dlh` 或其他 `<主干名>.<后缀>` 的 `maps/` 文件。正在使用的地图要同时下 `.smap` 和 `.2dlh`。7043 在 14:56 切开的 robokit 分段里没有加载行，warning 日志写的是 `Exol3Dpoints_18September_RemoveDeadEnd`。
 
-Ignore `[addMapMD5]`. That line registers `.smap` files present on the robot at startup (7 names in that log), not the map the robot was running. Ignore `uploadMap` names while `_currentMap` stays on another map; those files were uploaded and not loaded. If the log never names a loaded map, skip `maps/` and say so. Do not fall back to every file in the directory.
+Ignore `[addMapMD5]`. That line registers `.smap` files present on the robot at startup, not the map the robot was running. Ignore `uploadMap` names while `_currentMap` stays on another map; those files were uploaded and not loaded. Do not skip `maps/` only because `[smap][144` is absent. If none of these logs name a map, say so and skip `maps/`. Do not fall back to every file in the directory.
 
-不要把 `[addMapMD5]` 算进去。那一行只是启动时登记机器人上已有的 `.smap`（那份日志里有 7 个名字），不是正在使用的地图。`uploadMap` 里的名字如果 `_currentMap` 仍是另一张地图，表示只上传了、没有加载，也不要下。日志里完全没有加载记录时，跳过 `maps/` 并说明，不要退回成整目录下载。
+不要把 `[addMapMD5]` 算进去。那一行只是启动时登记机器人上已有的 `.smap`，不是正在使用的地图。`uploadMap` 里的名字如果 `_currentMap` 仍是另一张地图，表示只上传了、没有加载，也不要下。不能因为没有 `[smap][144` 就跳过 `maps/`。这些日志里都没有地图名时再说明并跳过，不要退回成整目录下载。
 
 ## 3. Store like `robokit-Debug-*.zip` / 按调试包目录存放
 
