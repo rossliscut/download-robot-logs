@@ -34,27 +34,27 @@ Pass `--start` and `--end` together only when the user named a window. Otherwise
 
 只有用户指定了时间范围才同时传 `--start` 和 `--end`。否则不要传，让工具自己用最新一份 `robokit_*.log`。
 
-The tool is the Cursor-hosted repo `ross-li/download-robot-logs`:
+The tool is the public GitHub repo `rossliscut/download-robot-logs`:
 
-- page: `https://cursor.com/codebase/ross-li/download-robot-logs`
-- clone URL: `https://origin.cursor.com/ross-li/download-robot-logs.git`
+- page: `https://github.com/rossliscut/download-robot-logs`
+- clone URL: `https://github.com/rossliscut/download-robot-logs.git`
 
-If `download-robot-logs --help` already works, use it. If the command is missing, clone that repo and install it, then run the command. Do not look for a machine-specific path such as `D:\workspace\...`.
+If `download-robot-logs --help` already works, use it. If the command is missing, clone that repo and install it, then run the command. Do not look for a machine-specific path such as `D:\workspace\...`. Anyone can clone the GitHub repo. The Cursor copy at `ross-li/download-robot-logs` is internal and is not the install source.
 
-工具就是 Cursor 上的仓库 `ross-li/download-robot-logs`：
+工具就是公开的 GitHub 仓库 `rossliscut/download-robot-logs`：
 
-- 页面：`https://cursor.com/codebase/ross-li/download-robot-logs`
-- 克隆地址：`https://origin.cursor.com/ross-li/download-robot-logs.git`
+- 页面：`https://github.com/rossliscut/download-robot-logs`
+- 克隆地址：`https://github.com/rossliscut/download-robot-logs.git`
 
-`download-robot-logs --help` 能跑就直接用。命令不在时，克隆这个仓库并安装，然后再执行。不要去找某一台电脑上的路径，例如 `D:\workspace\...`。
+`download-robot-logs --help` 能跑就直接用。命令不在时，克隆这个仓库并安装，然后再执行。不要去找某一台电脑上的路径，例如 `D:\workspace\...`。GitHub 上任何人都可以克隆。Cursor 上的 `ross-li/download-robot-logs` 是内部仓库，不要拿它当安装来源。
 
 Install when the command is missing / 命令不在时这样安装：
 
-1. On macOS, Linux, or WSL, follow the `origin` skill, then `origin repo clone ross-li/download-robot-logs`. Native Windows cannot install the origin CLI; use WSL for the clone, or `git clone` the URL above when git can already authenticate to `origin.cursor.com`.
+1. `git clone https://github.com/rossliscut/download-robot-logs.git`
 2. In the clone: `pip install -e .`
-3. Run `download-robot-logs` from step 1. If it is still not on PATH, run `python -m download_robot_logs` from the clone.
+3. Run `download-robot-logs`. If it is still not on PATH, run `python -m download_robot_logs` from the clone.
 
-1. macOS、Linux 或 WSL 上先按 `origin` 技能装好并登录，再执行 `origin repo clone ross-li/download-robot-logs`。原生 Windows 还不能装 origin CLI，用 WSL 来克隆；如果 git 已经能登录 `origin.cursor.com`，也可以直接 `git clone` 上面的地址。
+1. 执行 `git clone https://github.com/rossliscut/download-robot-logs.git`。
 2. 在克隆下来的目录里执行 `pip install -e .`。
 3. 再运行 `download-robot-logs`。如果还不在 PATH 里，就在该目录执行 `python -m download_robot_logs`。
 
