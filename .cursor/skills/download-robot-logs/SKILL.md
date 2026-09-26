@@ -178,9 +178,9 @@ From the 5130 list, download each `maps/` file whose name is `<stem>.smap`, `<st
 
 在 5130 的清单里，下载文件名是 `<主干名>.smap`、`<主干名>.2dlh` 或其他 `<主干名>.<后缀>` 的 `maps/` 文件。正在使用的地图要同时下 `.smap` 和 `.2dlh`。7043 在 14:56 切开的 robokit 分段里没有加载行，warning 日志写的是 `Exol3Dpoints_18September_RemoveDeadEnd`。
 
-Ignore `[addMapMD5]`. That line registers `.smap` files present on the robot at startup, not the map the robot was running. Ignore `uploadMap` names while `_currentMap` stays on another map; those files were uploaded and not loaded. Do not skip `maps/` only because `[smap][144` is absent. If none of these logs name a map, say so and skip `maps/`. Do not fall back to every file in the directory.
+Ignore `[addMapMD5]`. That line registers `.smap` files present on the robot at startup, not the map the robot was running. Ignore `uploadMap` names while `_currentMap` stays on another map; those files were uploaded and not loaded. Do not skip `maps/` only because `[smap][144` is absent. If none of these three logs name a map, download every file under `maps/`.
 
-不要把 `[addMapMD5]` 算进去。那一行只是启动时登记机器人上已有的 `.smap`，不是正在使用的地图。`uploadMap` 里的名字如果 `_currentMap` 仍是另一张地图，表示只上传了、没有加载，也不要下。不能因为没有 `[smap][144` 就跳过 `maps/`。这些日志里都没有地图名时再说明并跳过，不要退回成整目录下载。
+不要把 `[addMapMD5]` 算进去。那一行只是启动时登记机器人上已有的 `.smap`，不是正在使用的地图。`uploadMap` 里的名字如果 `_currentMap` 仍是另一张地图，表示只上传了、没有加载，也不要下。不能因为没有 `[smap][144` 就跳过 `maps/`。这三类日志里都没有地图名时，把 `maps/` 里的文件全部下载。
 
 ## 3. Store like `robokit-Debug-*.zip` / 按调试包目录存放
 

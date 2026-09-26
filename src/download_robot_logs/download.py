@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import zipfile
 from datetime import datetime
@@ -21,8 +22,34 @@ from download_robot_logs.select import (
 )
 
 
+_status_len = 0
+
+
+def _end_status() -> None:
+    global _status_len
+    if _status_len:
+        sys.stderr.write("\n")
+        sys.stderr.flush()
+        _status_len = 0
+
+
 def _log(message: str) -> None:
+    _end_status()
     print(message, file=sys.stderr, flush=True)
+
+
+def _progress(message: str) -> None:
+    """Overwrite one stderr line while a console is attached."""
+    global _status_len
+    if not sys.stderr.isatty():
+        _log(message)
+        return
+    columns = max(shutil.get_terminal_size(fallback=(80, 24)).columns - 1, 40)
+    text = message if len(message) <= columns else message[: columns - 1] + "…"
+    gap = " " * max(0, _status_len - len(text))
+    sys.stderr.write("\r" + text + gap)
+    sys.stderr.flush()
+    _status_len = len(text)
 
 
 def _is_map_source(rel: str) -> bool:
@@ -154,7 +181,7 @@ def run_batch(
             failed.append(f"{rel} {exc}")
             _log(f"{label} {index}/{len(batch)} FAIL {rel} {exc}")
             continue
-        _log(f"{label} {index}/{len(batch)} {size:10d} {rel}")
+        _progress(f"{label} {index}/{len(batch)} {size:10d} {rel}")
 
 
 def write_zip(root: Path, dest: Path) -> int:
@@ -213,11 +240,14 @@ def download_package(
         if stems:
             chosen = [item for item in maps if map_wanted(item[0].rsplit("/", 1)[-1], stems)]
             _log(f"maps keep {len(chosen)} skip {len(maps) - len(chosen)}")
-            run_batch(client, root, chosen, "map", failed)
         else:
-            _log("no current map named in robokit, warning, or error logs; skip maps/")
+            chosen = maps
+            _log(f"no map name in robokit, warning, or error logs; download all maps ({len(maps)})")
+        run_batch(client, root, chosen, "map", failed)
         run_batch(client, root, rest, "file", failed)
+        _log("packing")
         count = write_zip(root, output)
+        shutil.rmtree(root)
     finally:
         client.close()
     _log(f"DONE failed={len(failed)} files={count} zip={output}")
