@@ -27,12 +27,30 @@ When the user asks to download logs or a debug package, run this command. Do not
 
 ```text
 download-robot-logs --host <ip>
+download-robot-logs --host <ip> --last 10m
+download-robot-logs --host <ip> --rds --last 30m
 download-robot-logs --host <ip> --start "yyyy-MM-dd HH:MM:SS" --end "yyyy-MM-dd HH:MM:SS" --output <zip-or-dir>
 ```
 
-Pass `--start` and `--end` together only when the user named a window. Otherwise omit them and let the tool use the newest `robokit_*.log`.
+Add `--rds` when the user asks for RDS / RDSCore logs, not a robot Robokit package. Same port 19208, same 5130 then 5101. The 5130 body also sends `"isAiLogAnalysis":false` and `"isDownloadLogOnly":false`. Zip name is `RDSCore-Debug-<timestamp>.zip`. Do not apply the Robokit map filter.
 
-只有用户指定了时间范围才同时传 `--start` 和 `--end`。否则不要传，让工具自己用最新一份 `robokit_*.log`。
+用户要的是 RDS / RDSCore 日志，不是机器人 Robokit 包时，加上 `--rds`。端口仍是 19208，仍是先 5130 再 5101。5130 的正文还要带 `"isAiLogAnalysis":false` 和 `"isDownloadLogOnly":false`。zip 名叫 `RDSCore-Debug-<时间戳>.zip`。不要套用 Robokit 的地图过滤。
+
+Zip folders from the 2026-09-29 capture of `192.168.220.128`: `logs/` (RDS `Rds_*.log`), `log/` (core `rdscore_*.log` / `rdscore_*.log.gz`, `RobodPro_*.log`, `syslog`), `config/` (file name only, including files that live in `config/block/`), `script/`, `task/`, `rhcr/`, `scene/`, `models/` (keep `models/bak/`), `params/`, `db/`, `runtimes/`. `logs/` and `log/` are different directories. Hourly `Rds_*.log` and rotated `rdscore_*` stay only when their segment overlaps the window. If 5130 lists no `Rds_*.log`, list `/opt/.data/rds/logs` with 5100 and keep the overlapping files. Do not put local `Roboshop_*.log` into the zip.
+
+这次 `192.168.220.128` 的包里，zip 根目录是：`logs/`（RDS 的 `Rds_*.log`）、`log/`（core 的 `rdscore_*.log` / `rdscore_*.log.gz`、`RobodPro_*.log`、`syslog`）、`config/`（只保留文件名，`config/block/` 里的文件也摊平到这里）、`script/`、`task/`、`rhcr/`、`scene/`、`models/`（保留 `models/bak/`）、`params/`、`db/`、`runtimes/`。`logs/` 和 `log/` 不是同一个目录。按小时切的 `Rds_*.log` 和滚动的 `rdscore_*` 只保留时间段相交的。5130 没有 `Rds_*.log` 时，用 5100 列 `/opt/.data/rds/logs`，再按窗口留下相交的文件。本机的 `Roboshop_*.log` 不要打进 zip。
+
+Older Robod leaves rhcr out of the 5130 list. If no path contains `/rhcr/` or a `rhcr_` file, list `/opt/.data/rdscore/diagnosis/log` with 5100 and take the directory named `rhcr` (`file_path` when that entry has one). If the listing has no such directory, try `/opt/.data/rdscore/diagnosis/log/rhcr`, then the same two steps under `/opt/data/rdscore/diagnosis/log`. Keep `rhcr_*.log` and `rhcr_*.log.gz` whose segment overlaps the window. One file still open at download time covers the window even when its name is older. A missing directory is normal.
+
+老版 Robod 的 5130 清单里经常没有 rhcr。路径里没有 `/rhcr/`、也没有 `rhcr_` 文件时，用 5100 列 `/opt/.data/rdscore/diagnosis/log`，取名为 `rhcr` 的目录（条目里有 `file_path` 就用它）。清单里没有这个目录时，再试 `/opt/.data/rdscore/diagnosis/log/rhcr`，然后对 `/opt/data/rdscore/diagnosis/log` 做同样的两步。只保留时间段和窗口相交的 `rhcr_*.log`、`rhcr_*.log.gz`。下载时还没切走的那一份，文件名即使更早也算盖住窗口。目录不存在是正常的。
+
+When the user asks for a recent span (最近 10 分钟, last half hour), pass `--last` and do not compute the window from this computer's clock. `--last 10m` means ten minutes; a bare number is minutes (`--last 10`), and `1h` / `90s` / `0:10:00` also work. `--Last` is the same flag. The tool asks the robot for its clock first (API **5117** `robot_core_datetime_req` → **15117**, empty body, `{"dateTime":"yyyy-MM-dd HH:mm:ss:mmm"}`), then the window ends at that time.
+
+用户说最近一段时间（最近 10 分钟、最近半小时）时，传 `--last`，不要用这台电脑的时钟去算起止。`--last 10m` 是 10 分钟；只写数字就是分钟（`--last 10`），也可以写 `1h`、`90s`、`0:10:00`。`--Last` 是同一个参数。工具会先问机器人当前时间（API **5117** `robot_core_datetime_req` → **15117**，正文为空，返回 `{"dateTime":"yyyy-MM-dd HH:mm:ss:mmm"}`），窗口的结束时刻就是这个时间。
+
+Pass `--start` and `--end` together only when the user named an absolute window. Do not combine them with `--last`. Otherwise omit all three. Robokit then uses the newest `robokit_*.log`. `--rds` uses the newest `rdscore_*.log`.
+
+只有用户给了绝对起止时间才同时传 `--start` 和 `--end`。不要和 `--last` 一起用。都没说的话三个都不要传。Robokit 用最新一份 `robokit_*.log`。`--rds` 用最新一份 `rdscore_*.log`。
 
 The tool is the public GitHub repo `rossliscut/download-robot-logs`:
 
@@ -93,9 +111,9 @@ Response is `{"fileList":[{"dirName":"...","filePaths":["/abs/path", ...]}]}`. `
 
 响应是 `{"fileList":[{"dirName":"...","filePaths":["/绝对路径", ...]}]}`。`filePaths` 是机器人上的绝对路径，要去重。同一个 `dirName` 可能出现多次。
 
-Ask for the robot IP if it was not given. For the time window, follow the rule in the patlog section: use the window the user asked for, or the newest `robokit_*.log` when they did not give one. Do not widen the window across days.
+Ask for the robot IP if it was not given. For a recent span, pass `--last` so the window is measured from the robot clock (5117), not from this computer. For an absolute window, pass `--start` and `--end`. If the user named neither, use the newest `robokit_*.log`. Do not widen the window across days.
 
-没给机器人 IP 就先问。时间范围按后面 patlog 那一节：用户指定了就用指定的，没指定就用最新一份 `robokit_*.log`。不要把窗口拉到跨天。
+没给机器人 IP 就先问。最近一段时间用 `--last`，按机器人自己的时钟（5117）往前算，不要用这台电脑的时间。绝对起止用 `--start` 和 `--end`。都没说就用最新一份 `robokit_*.log`。不要把窗口拉到跨天。
 
 ## Patlog when 5130 omits it / 清单里没有 patlog 时
 
@@ -127,9 +145,9 @@ Store every kept file as `log/patlogs/<name>`, including files that came from `r
 
 留下的文件都存成 `log/patlogs/<文件名>`，包括从 `resources/patlogs` 找到的。
 
-The package time window is the one the user asked for. If they did not give one, use the newest `robokit_*.log`: from the timestamp in that filename until the download time. Do not widen `startTime`/`endTime` across days just to make 5130 return resources. Resources come back either way. A wide window also returns every old rotated log, and that is what made the 14:27 package 450 MB instead of about 250 MB.
+The package time window is the one the user asked for. A recent span (`--last`) ends at the robot clock from 5117 and starts that far before it. An absolute window uses `--start` and `--end` as given. If they did not give one, use the newest `robokit_*.log`: from the timestamp in that filename until the download time. Do not widen `startTime`/`endTime` across days just to make 5130 return resources. Resources come back either way. A wide window also returns every old rotated log, and that is what made the 14:27 package 450 MB instead of about 250 MB.
 
-调试包的时间范围以用户指定的为准。用户没指定时，用最新的一份 `robokit_*.log`：从文件名里的时间到本次下载的时刻。不要为了让 5130 返回资源而把 `startTime`/`endTime` 拉到跨天。资源目录怎么样都会返回。窗口拉宽还会把旧的滚动日志整段带出来。14:27 那次包变成 450 MB 而不是大约 250 MB，就是这个原因。
+调试包的时间范围以用户指定的为准。最近一段时间（`--last`）的结束时刻是 5117 读到的机器人时间，开始时刻再往前推这段时长。绝对窗口就用给出的 `--start` 和 `--end`。用户没指定时，用最新的一份 `robokit_*.log`：从文件名里的时间到本次下载的时刻。不要为了让 5130 返回资源而把 `startTime`/`endTime` 拉到跨天。资源目录怎么样都会返回。窗口拉宽还会把旧的滚动日志整段带出来。14:27 那次包变成 450 MB 而不是大约 250 MB，就是这个原因。
 
 Apply that window to every rotated log, not only `.pat`: `robokit_*.log`, `robokit_warning_*.log`, `robokit_error_*.log`, `trace/*.pft.zst`, `d/*.d.log.zst`, `RobodPro_*.log`, and `patlogs/*.pat`. A file covers the time from its filename timestamp until the next file in the same series (the newest runs until the download). Keep it when that span overlaps the window, including the file that was already open at the window start. Skip the previous file when it only continues for under a minute into the window. Files with no timestamp stay (`syslog`, `kern.log`, `crash.log`).
 

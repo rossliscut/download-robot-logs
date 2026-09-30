@@ -7,6 +7,13 @@ from datetime import datetime, timedelta
 
 RBK = "/usr/local/etc/.SeerRobotics/rbk/resources/"
 LOG_DIR = "/usr/local/etc/.SeerRobotics/rbk/diagnosis/log"
+RDS_CORE_LOG = "/opt/.data/rdscore/diagnosis/log"
+RDS_APP_LOGS = "/opt/.data/rds/logs"
+RDS_MODELS = "/opt/.data/rdscore/resources/models/"
+RHCR_PARENTS = [
+    RDS_CORE_LOG,
+    "/opt/data/rdscore/diagnosis/log",
+]
 PAT_DIRS = [
     LOG_DIR + "/patlogs",
     RBK + "patlogs",
@@ -17,6 +24,12 @@ CURRENT = re.compile(r"_currentMap\|([^\s|\]]+)")
 SUCCESS = re.compile(r"\[smap\]\[644\|(\S+) success")
 MAP_PATH = re.compile(r"/maps/(?:tmp/)?([^/\s|\]\"']+)")
 TIME_FMT = "%Y-%m-%d %H:%M:%S"
+ROBOT_CLOCK = re.compile(r"(20\d{2})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})")
+_LAST = re.compile(
+    r"^(\d+(?:\.\d+)?)(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hour|hours|d|day|days)?$",
+    re.IGNORECASE,
+)
+_HMS = re.compile(r"^(\d+):(\d{2}):(\d{2})$")
 
 
 def parse_stamp(name: str) -> datetime | None:
@@ -29,6 +42,41 @@ def parse_stamp(name: str) -> datetime | None:
 
 def format_time(value: datetime) -> str:
     return value.strftime(TIME_FMT)
+
+
+def parse_robot_datetime(text: str) -> datetime | None:
+    """Robot local time from 15117 dateTime, ignoring the millisecond tail."""
+    match = ROBOT_CLOCK.search(text)
+    if not match:
+        return None
+    year, month, day, hour, minute, second = (int(part) for part in match.groups())
+    return datetime(year, month, day, hour, minute, second)
+
+
+def parse_last(value: str) -> timedelta:
+    """Duration for --last. A bare number is minutes."""
+    text = value.strip()
+    clock = _HMS.fullmatch(text)
+    if clock:
+        hours, minutes, seconds = (int(part) for part in clock.groups())
+        span = timedelta(hours=hours, minutes=minutes, seconds=seconds)
+    else:
+        match = _LAST.fullmatch(text)
+        if not match:
+            raise ValueError(f"use 10m, 1h, 90s, or 0:10:00, got {value}")
+        amount = float(match.group(1))
+        unit = (match.group(2) or "m").lower()
+        if unit in {"m", "min", "mins", "minute", "minutes"}:
+            span = timedelta(minutes=amount)
+        elif unit in {"s", "sec", "secs", "second", "seconds"}:
+            span = timedelta(seconds=amount)
+        elif unit in {"h", "hr", "hour", "hours"}:
+            span = timedelta(hours=amount)
+        else:
+            span = timedelta(days=amount)
+    if span.total_seconds() <= 0:
+        raise ValueError("duration must be positive")
+    return span
 
 
 def to_zip_rel(full: str) -> str | None:
@@ -50,6 +98,75 @@ def to_zip_rel(full: str) -> str | None:
     return None
 
 
+def to_rds_zip_rel(full: str) -> str | None:
+    """Zip path for an RDSCore debug package. config/ is flattened to the file name."""
+    full = full.replace("\\", "/")
+    name = full.rsplit("/", 1)[-1]
+    if not name or name.startswith("Roboshop_"):
+        return None
+    if full.startswith("/opt/data/rds/config/"):
+        return "config/" + name
+    if full.startswith("/opt/data/rds/script/"):
+        return "script/" + name
+    if full.startswith("/opt/data/rds/history/task/"):
+        return "task/" + name
+    if full.startswith(RDS_APP_LOGS + "/"):
+        return "logs/" + name
+    if "/diagnosis/log/rhcr/" in full:
+        return "rhcr/" + name
+    if "/diagnosis/log/" in full:
+        return "log/" + name
+    if full.startswith("/opt/.data/rdscore/resources/params/"):
+        return "params/" + name
+    if full.startswith("/opt/.data/rdscore/resources/scene/"):
+        return "scene/" + name
+    if full.startswith(RDS_MODELS):
+        return "models/" + full[len(RDS_MODELS) :]
+    if full.startswith("/opt/.data/rdscore/resources/runtimes/"):
+        return "runtimes/" + name
+    if full.startswith("/opt/.data/rdscore/resources/db/"):
+        return "db/" + name
+    if full.startswith("/var/log/"):
+        return "log/" + name
+    if "/robod/appInfo/log/" in full:
+        return "log/" + name
+    return None
+
+
+def listed_rhcr(paths: list[str]) -> bool:
+    """True when 5130 already named an rhcr log or its directory."""
+    for path in paths:
+        full = path.replace("\\", "/")
+        name = full.rsplit("/", 1)[-1]
+        if "/rhcr/" in full or name.startswith("rhcr_"):
+            return True
+    return False
+
+
+def rhcr_dir_from_listing(parent: str, items: list[dict]) -> str | None:
+    """Directory path for a child named rhcr. Prefer file_path from 5100."""
+    parent = parent.replace("\\", "/").rstrip("/")
+    for item in items:
+        if not item.get("is_dir") or str(item.get("name") or "") != "rhcr":
+            continue
+        raw = str(item.get("file_path") or "").replace("\\", "/").rstrip("/")
+        if raw.startswith("/"):
+            return raw
+        return parent + "/rhcr"
+    return None
+
+
+def rhcr_log_names(items: list[dict]) -> list[str]:
+    names: list[str] = []
+    for item in items:
+        if item.get("is_dir"):
+            continue
+        name = str(item.get("name") or "")
+        if name.startswith("rhcr_") and name.endswith((".log", ".log.gz")):
+            names.append(name)
+    return names
+
+
 def series_key(rel: str) -> str | None:
     name = rel.rsplit("/", 1)[-1]
     if rel.startswith("log/patlogs/") and name.endswith(".pat"):
@@ -62,6 +179,12 @@ def series_key(rel: str) -> str | None:
         return "warning"
     if rel.startswith("log/error/"):
         return "error"
+    if rel.startswith("logs/") and name.startswith("Rds_") and name.endswith(".log"):
+        return "rds"
+    if rel.startswith("rhcr/") and name.startswith("rhcr_"):
+        return "rhcr"
+    if rel.count("/") == 1 and name.startswith("rdscore_") and name.endswith((".log", ".log.gz")):
+        return "rdscore"
     if rel.count("/") == 1 and name.startswith("RobodPro_"):
         return "robod"
     if (
@@ -91,9 +214,6 @@ def filter_rotated(
     grouped: dict[str, list[tuple[datetime, str]]] = {}
     kept: list[str] = []
     for rel in rels:
-        if not rel.startswith("log/"):
-            kept.append(rel)
-            continue
         start = parse_stamp(rel)
         key = series_key(rel)
         if start is None or key is None:

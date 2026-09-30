@@ -1,10 +1,16 @@
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from download_robot_logs.select import (
     filter_rotated,
+    listed_rhcr,
     loaded_map_stems,
     map_wanted,
+    parse_last,
+    parse_robot_datetime,
+    rhcr_dir_from_listing,
+    rhcr_log_names,
+    to_rds_zip_rel,
     to_zip_rel,
 )
 
@@ -28,6 +34,90 @@ class LayoutTest(unittest.TestCase):
             "log/patlogs/pat_2026-09-26_12-27-35.pat",
         )
         self.assertEqual(to_zip_rel("/var/log/syslog"), "log/syslog")
+
+    def test_rds_zip_paths(self) -> None:
+        self.assertEqual(
+            to_rds_zip_rel("/opt/data/rds/config/block/BatchSettingSiteBp_en.json"),
+            "config/BatchSettingSiteBp_en.json",
+        )
+        self.assertEqual(
+            to_rds_zip_rel("/opt/data/rds/config/biz/SingleForkScene/taskList.task"),
+            "config/taskList.task",
+        )
+        self.assertEqual(
+            to_rds_zip_rel("/opt/.data/rdscore/resources/models/bak/20250912113414.robot.model"),
+            "models/bak/20250912113414.robot.model",
+        )
+        self.assertEqual(
+            to_rds_zip_rel("/opt/data/rds/history/task/7009Bench-1789427719296.task"),
+            "task/7009Bench-1789427719296.task",
+        )
+        self.assertEqual(
+            to_rds_zip_rel("/opt/.data/rds/logs/Rds_2026-09-29_10-00-00.log"),
+            "logs/Rds_2026-09-29_10-00-00.log",
+        )
+        self.assertEqual(
+            to_rds_zip_rel("/opt/.data/rdscore/diagnosis/log/rhcr/rhcr_2026-09-15_07-21-03_1.log"),
+            "rhcr/rhcr_2026-09-15_07-21-03_1.log",
+        )
+        self.assertEqual(
+            to_rds_zip_rel("/opt/.data/rdscore/diagnosis/log/rdscore_2026-09-29_10-36-01.78.log"),
+            "log/rdscore_2026-09-29_10-36-01.78.log",
+        )
+
+    def test_rhcr_directory_comes_from_listing(self) -> None:
+        parent = "/opt/.data/rdscore/diagnosis/log"
+        self.assertFalse(listed_rhcr(["/opt/.data/rdscore/diagnosis/log/rdscore_2026-09-29_12-09-04.1.log"]))
+        self.assertTrue(listed_rhcr([parent + "/rhcr/rhcr_2026-09-15_07-21-03_1.log"]))
+        found = rhcr_dir_from_listing(
+            parent,
+            [
+                {"name": "rdscore_2026-09-29_12-09-04.1.log", "is_dir": False},
+                {"name": "rhcr", "is_dir": True, "file_path": parent + "/rhcr"},
+            ],
+        )
+        self.assertEqual(found, parent + "/rhcr")
+        built = rhcr_dir_from_listing(parent, [{"name": "rhcr", "is_dir": True}])
+        self.assertEqual(built, parent + "/rhcr")
+        self.assertIsNone(rhcr_dir_from_listing(parent, [{"name": "rhcr_old.log", "is_dir": False}]))
+        self.assertEqual(
+            rhcr_log_names(
+                [
+                    {"name": "rhcr_2026-09-15_07-21-03_1.log", "is_dir": False},
+                    {"name": "notes.txt", "is_dir": False},
+                    {"name": "rhcr", "is_dir": True},
+                ]
+            ),
+            ["rhcr_2026-09-15_07-21-03_1.log"],
+        )
+
+    def test_rhcr_keeps_segment_that_covers_the_window(self) -> None:
+        rels = [
+            "rhcr/rhcr_2026-09-15_07-21-03_1.log",
+            "rhcr/rhcr_2026-09-29_12-00-00_1.log",
+            "rhcr/rhcr_2026-09-29_12-20-00_1.log",
+        ]
+        start = datetime(2026, 9, 29, 12, 10, 2)
+        end = datetime(2026, 9, 29, 12, 15, 2)
+        kept = set(filter_rotated(rels, start, end, end))
+        self.assertNotIn("rhcr/rhcr_2026-09-15_07-21-03_1.log", kept)
+        self.assertIn("rhcr/rhcr_2026-09-29_12-00-00_1.log", kept)
+        self.assertNotIn("rhcr/rhcr_2026-09-29_12-20-00_1.log", kept)
+        only = ["rhcr/rhcr_2026-09-15_07-21-03_1.log"]
+        self.assertEqual(filter_rotated(only, start, end, end), only)
+
+    def test_rds_hour_log_outside_window_is_dropped(self) -> None:
+        rels = [
+            "logs/Rds_2026-09-29_09-00-00.log",
+            "logs/Rds_2026-09-29_10-00-00.log",
+            "config/rbk-scripts.json",
+        ]
+        start = datetime(2026, 9, 29, 10, 10, 45)
+        end = datetime(2026, 9, 29, 10, 40, 45)
+        kept = set(filter_rotated(rels, start, end, end))
+        self.assertNotIn("logs/Rds_2026-09-29_09-00-00.log", kept)
+        self.assertIn("logs/Rds_2026-09-29_10-00-00.log", kept)
+        self.assertIn("config/rbk-scripts.json", kept)
 
     def test_rotated_window_drops_previous_day(self) -> None:
         rels = [
@@ -90,6 +180,21 @@ class LayoutTest(unittest.TestCase):
         )
         stems = loaded_map_stems(text)
         self.assertEqual(stems, {"Exol3Dpoints_18September_RemoveDeadEnd"})
+
+    def test_robot_clock_drops_milliseconds(self) -> None:
+        self.assertEqual(
+            parse_robot_datetime('{"dateTime":"2026-09-26 13:21:02:601"}'),
+            datetime(2026, 9, 26, 13, 21, 2),
+        )
+
+    def test_last_duration(self) -> None:
+        self.assertEqual(parse_last("10"), timedelta(minutes=10))
+        self.assertEqual(parse_last("10m"), timedelta(minutes=10))
+        self.assertEqual(parse_last("1h"), timedelta(hours=1))
+        self.assertEqual(parse_last("90s"), timedelta(seconds=90))
+        self.assertEqual(parse_last("0:10:00"), timedelta(minutes=10))
+        with self.assertRaises(ValueError):
+            parse_last("0")
 
 
 if __name__ == "__main__":

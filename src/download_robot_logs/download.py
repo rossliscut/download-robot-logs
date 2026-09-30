@@ -6,18 +6,26 @@ import json
 import shutil
 import sys
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from download_robot_logs.client import RobodClient
 from download_robot_logs.select import (
     LOG_DIR,
     PAT_DIRS,
+    RDS_APP_LOGS,
+    RDS_CORE_LOG,
+    RHCR_PARENTS,
     filter_rotated,
+    listed_rhcr,
+    rhcr_dir_from_listing,
+    rhcr_log_names,
     format_time,
     loaded_map_stems,
+    parse_robot_datetime,
     map_wanted,
     parse_stamp,
+    to_rds_zip_rel,
     to_zip_rel,
 )
 
@@ -86,6 +94,23 @@ def list_dir(client: RobodClient, directory: str) -> list[dict]:
     return list(data.get("file_list") or [])
 
 
+def robot_now(client: RobodClient) -> datetime:
+    """Wall clock on the controller, from 5117 robot_core_datetime_req."""
+    api, blob = client.call(5117, b"", 15)
+    if api != 15117 or not blob:
+        raise RuntimeError(f"5117 api={api} bytes={len(blob)}")
+    try:
+        data = json.loads(blob.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("5117 not json") from exc
+    raw = str(data.get("dateTime") or "")
+    when = parse_robot_datetime(raw)
+    if when is None:
+        raise RuntimeError(f"5117 dateTime unreadable: {raw}")
+    _log(f"robot time {format_time(when)}")
+    return when
+
+
 def newest_robokit_start(client: RobodClient) -> datetime | None:
     names = [
         str(item.get("name") or "")
@@ -104,11 +129,15 @@ def newest_robokit_start(client: RobodClient) -> datetime | None:
     return max(stamps) if stamps else None
 
 
-def list_5130(client: RobodClient, start: datetime, end: datetime) -> list[str]:
+def list_5130(client: RobodClient, start: datetime, end: datetime, rds: bool = False) -> list[str]:
+    body: dict[str, object] = {"startTime": format_time(start), "endTime": format_time(end)}
+    if rds:
+        body["isAiLogAnalysis"] = False
+        body["isDownloadLogOnly"] = False
     api, blob = _json_call(
         client,
         5130,
-        {"startTime": format_time(start), "endTime": format_time(end)},
+        body,
         60,
     )
     _log(f"5130 api={api} bytes={len(blob)} {format_time(start)} -> {format_time(end)}")
@@ -145,11 +174,65 @@ def extra_pats(client: RobodClient, paths: list[str]) -> list[str]:
     return []
 
 
-def jobs_from_paths(paths: list[str]) -> list[tuple[str, str]]:
+def newest_rdscore_start(client: RobodClient) -> datetime | None:
+    stamps = []
+    for item in list_dir(client, RDS_CORE_LOG):
+        if item.get("is_dir"):
+            continue
+        name = str(item.get("name") or "")
+        if not (name.startswith("rdscore_") and name.endswith((".log", ".log.gz"))):
+            continue
+        stamp = parse_stamp(name)
+        if stamp is not None:
+            stamps.append(stamp)
+    return max(stamps) if stamps else None
+
+
+def extra_rds_logs(client: RobodClient, paths: list[str]) -> list[str]:
+    if any(path.startswith(RDS_APP_LOGS + "/") or path.rsplit("/", 1)[-1].startswith("Rds_") for path in paths):
+        _log("rds logs already in 5130")
+        return []
+    _log("5130 has no Rds log, listing directory")
+    names = [
+        str(item.get("name") or "")
+        for item in list_dir(client, RDS_APP_LOGS)
+        if not item.get("is_dir") and str(item.get("name") or "").startswith("Rds_") and str(item.get("name") or "").endswith(".log")
+    ]
+    if not names:
+        _log("no Rds log directory")
+        return []
+    _log(f"rds log files: {len(names)}")
+    return [f"{RDS_APP_LOGS}/{name}" for name in names]
+
+
+def extra_rhcr(client: RobodClient, paths: list[str]) -> list[str]:
+    """Older Robod omits rhcr from 5130. Find the directory and return its logs."""
+    if listed_rhcr(paths):
+        _log("rhcr already in 5130")
+        return []
+    _log("5130 has no rhcr, looking for directory")
+    for parent in RHCR_PARENTS:
+        listing = list_dir(client, parent)
+        directory = rhcr_dir_from_listing(parent, listing)
+        if directory is None:
+            directory = parent.rstrip("/") + "/rhcr"
+            listing = list_dir(client, directory)
+        else:
+            listing = list_dir(client, directory)
+        names = rhcr_log_names(listing)
+        if not names:
+            continue
+        _log(f"rhcr files {directory}: {len(names)}")
+        return [f"{directory}/{name}" for name in names]
+    _log("no rhcr directory")
+    return []
+
+
+def jobs_from_paths(paths: list[str], rds: bool = False) -> list[tuple[str, str]]:
     jobs: list[tuple[str, str]] = []
     seen: set[str] = set()
     for full in paths:
-        rel = to_zip_rel(full)
+        rel = to_rds_zip_rel(full) if rds else to_zip_rel(full)
         if not rel or rel.startswith("log/Roboshop_") or rel in seen:
             continue
         seen.add(rel)
@@ -206,45 +289,61 @@ def download_package(
     output: Path,
     start: datetime | None,
     end: datetime | None,
+    last: timedelta | None = None,
+    rds: bool = False,
 ) -> tuple[Path, int]:
-    download_time = datetime.now().replace(microsecond=0)
-    window_end = end or download_time
     client = RobodClient(host, port)
     failed: list[str] = []
     try:
-        window_start = start or newest_robokit_start(client)
+        if last is not None:
+            download_time = robot_now(client)
+            window_end = download_time
+            window_start = download_time - last
+        else:
+            download_time = datetime.now().replace(microsecond=0)
+            window_end = end or download_time
+            window_start = start or (newest_rdscore_start(client) if rds else newest_robokit_start(client))
         if window_start is None:
-            raise RuntimeError("no robokit_*.log found; pass --start and --end")
+            missing = "rdscore_*.log" if rds else "robokit_*.log"
+            raise RuntimeError(f"no {missing} found; pass --start and --end")
         if window_start >= window_end:
             raise RuntimeError(f"empty window {format_time(window_start)} -> {format_time(window_end)}")
-        paths = list_5130(client, window_start, window_end)
-        paths.extend(extra_pats(client, paths))
-        jobs = jobs_from_paths(paths)
+        paths = list_5130(client, window_start, window_end, rds)
+        if rds:
+            paths.extend(extra_rds_logs(client, paths))
+            paths.extend(extra_rhcr(client, paths))
+        else:
+            paths.extend(extra_pats(client, paths))
+        jobs = jobs_from_paths(paths, rds)
         rels = [rel for rel, _full in jobs]
         allowed = set(filter_rotated(rels, window_start, window_end, download_time))
         jobs = [(rel, full) for rel, full in jobs if rel in allowed]
-        robokit = [item for item in jobs if _is_map_source(item[0])]
-        maps = [item for item in jobs if item[0].startswith("maps/")]
-        rest = [item for item in jobs if item not in robokit and item not in maps]
         _log(f"window {format_time(window_start)} -> {format_time(window_end)}")
-        _log(f"jobs robokit={len(robokit)} maps={len(maps)} other={len(rest)}")
         root = output.parent / (output.stem + "-files")
         root.mkdir(parents=True, exist_ok=True)
-        run_batch(client, root, robokit, "log", failed)
-        stems: set[str] = set()
-        for rel, _full in robokit:
-            path = root / rel
-            if path.is_file():
-                stems |= loaded_map_stems(path.read_text(encoding="utf-8", errors="replace"))
-        _log("loaded maps " + (", ".join(sorted(stems)) if stems else "(none)"))
-        if stems:
-            chosen = [item for item in maps if map_wanted(item[0].rsplit("/", 1)[-1], stems)]
-            _log(f"maps keep {len(chosen)} skip {len(maps) - len(chosen)}")
+        if rds:
+            _log(f"jobs files={len(jobs)}")
+            run_batch(client, root, jobs, "file", failed)
         else:
-            chosen = maps
-            _log(f"no map name in robokit, warning, or error logs; download all maps ({len(maps)})")
-        run_batch(client, root, chosen, "map", failed)
-        run_batch(client, root, rest, "file", failed)
+            robokit = [item for item in jobs if _is_map_source(item[0])]
+            maps = [item for item in jobs if item[0].startswith("maps/")]
+            rest = [item for item in jobs if item not in robokit and item not in maps]
+            _log(f"jobs robokit={len(robokit)} maps={len(maps)} other={len(rest)}")
+            run_batch(client, root, robokit, "log", failed)
+            stems: set[str] = set()
+            for rel, _full in robokit:
+                path = root / rel
+                if path.is_file():
+                    stems |= loaded_map_stems(path.read_text(encoding="utf-8", errors="replace"))
+            _log("loaded maps " + (", ".join(sorted(stems)) if stems else "(none)"))
+            if stems:
+                chosen = [item for item in maps if map_wanted(item[0].rsplit("/", 1)[-1], stems)]
+                _log(f"maps keep {len(chosen)} skip {len(maps) - len(chosen)}")
+            else:
+                chosen = maps
+                _log(f"no map name in robokit, warning, or error logs; download all maps ({len(maps)})")
+            run_batch(client, root, chosen, "map", failed)
+            run_batch(client, root, rest, "file", failed)
         _log("packing")
         count = write_zip(root, output)
         shutil.rmtree(root)
