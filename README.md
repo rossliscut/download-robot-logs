@@ -8,10 +8,11 @@
 download-robot-logs --host 10.1.48.64
 download-robot-logs --host 10.1.48.64 --last 10m
 download-robot-logs --host 192.168.220.128 --rds --last 30m
+download-robot-logs --host 192.168.252.3 --m4 --port 5800 --user <user> --password <password> --last 1h
 download-robot-logs --host 10.1.48.64 --start "2026-09-26 12:27:23" --end "2026-09-26 14:27:07" --output D:\logs
 ```
 
-`--last` 表示从机器人当前时间往前的一段时间，例如 `10m`、`1h`、`90s`，只写数字就是分钟。工具先用 API 5117 读取控制器时钟，再按这个时间计算窗口。`--rds` 下载 RDSCore 调试包（`logs/` 是 RDS 日志，`log/` 是 rdscore），默认文件名是 `RDSCore-Debug-<时间戳>.zip`。5130 没有 rhcr 时，会在 rdscore 的 diagnosis/log 下找 `rhcr` 目录，只下载和时间范围相交的 `rhcr_*.log`。`--start` 和 `--end` 要成对出现，格式是 `yyyy-MM-dd HH:MM:SS`，并且不能和 `--last` 一起用。`--output` 可以是 zip 文件，也可以是目录。成功时把 zip 路径打到标准输出。
+`--last` 表示从机器人当前时间往前的一段时间，例如 `10m`、`1h`、`90s`，只写数字就是分钟。Robokit 和 RDS 先用 API 5117 读取控制器时钟，再按这个时间计算窗口。`--rds` 下载 RDSCore 调试包（`logs/` 是 RDS 日志，`log/` 是 rdscore），默认文件名是 `RDSCore-Debug-<时间戳>.zip`。5130 没有 rhcr 时，会在 rdscore 的 diagnosis/log 下找 `rhcr` 目录，只下载和时间范围相交的 `rhcr_*.log`。`--m4` 从 M4 下载服务器已经打好的 zip，`--port` 默认是 5800：先 `POST /api/sign-in`，再 `POST /api/log-files/download`，最后 `GET /api/files/get/<path>`。M4 必须带 `--last` 或成对的 `--start`/`--end`。`--last` 在 `/api/base` 和 `/api/ping` 里没有带时区的时间时，用运行命令这台电脑的时钟。`--start` 和 `--end` 要成对出现，格式是 `yyyy-MM-dd HH:MM:SS`，并且不能和 `--last` 一起用。`--output` 可以是 zip 文件，也可以是目录。成功时把 zip 路径打到标准输出。
 
 安装：
 

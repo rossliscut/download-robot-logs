@@ -5,8 +5,10 @@ description: >-
   on TCP 19208 lists files, API 5101 downloads each one, then pack a deflated
   robokit-Debug zip (log, maps, models, roboview, calibrations, scripts).
   从机器人下载 Roboshop 风格的调试包：TCP 19208 上用 5130 列文件、5101 逐个下载，
-  再打成 deflate 的 robokit-Debug zip。Use when the user asks to 获取日志,
-  下载日志, 导出调试包, fetch a robot log, or match a Roboshop debug zip.
+  再打成 deflate 的 robokit-Debug zip。M4 logs are a server-built zip from
+  HTTP port 5800: POST /api/log-files/download, then GET /api/files/get.
+  Use when the user asks to 获取日志, 下载日志, 导出调试包, fetch a robot log,
+  download M4 logs, or match a Roboshop debug zip.
 ---
 
 # Download Robot Debug Package / 下载机器人调试包
@@ -29,6 +31,7 @@ When the user asks to download logs or a debug package, run this command. Do not
 download-robot-logs --host <ip>
 download-robot-logs --host <ip> --last 10m
 download-robot-logs --host <ip> --rds --last 30m
+download-robot-logs --host <ip> --m4 --port 5800 --user <user> --password <password> --last 1h
 download-robot-logs --host <ip> --start "yyyy-MM-dd HH:MM:SS" --end "yyyy-MM-dd HH:MM:SS" --output <zip-or-dir>
 ```
 
@@ -44,13 +47,29 @@ Older Robod leaves rhcr out of the 5130 list. If no path contains `/rhcr/` or a 
 
 老版 Robod 的 5130 清单里经常没有 rhcr。路径里没有 `/rhcr/`、也没有 `rhcr_` 文件时，用 5100 列 `/opt/.data/rdscore/diagnosis/log`，取名为 `rhcr` 的目录（条目里有 `file_path` 就用它）。清单里没有这个目录时，再试 `/opt/.data/rdscore/diagnosis/log/rhcr`，然后对 `/opt/data/rdscore/diagnosis/log` 做同样的两步。只保留时间段和窗口相交的 `rhcr_*.log`、`rhcr_*.log.gz`。下载时还没切走的那一份，文件名即使更早也算盖住窗口。目录不存在是正常的。
 
-When the user asks for a recent span (最近 10 分钟, last half hour), pass `--last` and do not compute the window from this computer's clock. `--last 10m` means ten minutes; a bare number is minutes (`--last 10`), and `1h` / `90s` / `0:10:00` also work. `--Last` is the same flag. The tool asks the robot for its clock first (API **5117** `robot_core_datetime_req` → **15117**, empty body, `{"dateTime":"yyyy-MM-dd HH:mm:ss:mmm"}`), then the window ends at that time.
+Add `--m4` for an M4 log zip. Pass `--port` for the HTTP port; the default is **5800**. This is not Robod 19208. Do not call 5130 or 5101, and do not repack the zip. The server already built it. Verified against `192.168.252.3` on 2026-10-01.
 
-用户说最近一段时间（最近 10 分钟、最近半小时）时，传 `--last`，不要用这台电脑的时钟去算起止。`--last 10m` 是 10 分钟；只写数字就是分钟（`--last 10`），也可以写 `1h`、`90s`、`0:10:00`。`--Last` 是同一个参数。工具会先问机器人当前时间（API **5117** `robot_core_datetime_req` → **15117**，正文为空，返回 `{"dateTime":"yyyy-MM-dd HH:mm:ss:mmm"}`），窗口的结束时刻就是这个时间。
+用户要的是 M4 日志时，加上 `--m4`。HTTP 端口用 `--port`，默认是 **5800**。这不是 Robod 19208。不要调用 5130 或 5101，也不要在本地重打包。zip 是服务器打好的。2026-10-01 用 `192.168.252.3` 核对过。
 
-Pass `--start` and `--end` together only when the user named an absolute window. Do not combine them with `--last`. Otherwise omit all three. Robokit then uses the newest `robokit_*.log`. `--rds` uses the newest `rdscore_*.log`.
+1. `POST /api/sign-in` with `{"username","password"}`. Headers: `Accept: application/json, text/plain, */*`, `Content-Type: application/json`, `Pragma: no-cache`. Keep the `Set-Cookie`. Pass `--user` and `--password` together. If they are omitted and the next call returns 401, ask for them.
+2. `POST /api/log-files/download`, timeout 1800 seconds. Same three headers plus `Cookie`. Body is `{"from","to","types"}`. `from` and `to` are UTC ISO timestamps. Default `types` are `system`, `fleet`, `rbk`, `fleet-op`, `scene`, `oke`, `falcon`, `script`. Narrow them with `--types system,fleet`. The JSON response is `{"path":"tmp/m4-logs-....zip"}`.
+3. `GET /api/files/get/<path>` with `Accept: */*` and the same `Cookie`. No `Content-Type` and no `Pragma`. Write the body as the zip. The default file name is the one in `path`.
 
-只有用户给了绝对起止时间才同时传 `--start` 和 `--end`。不要和 `--last` 一起用。都没说的话三个都不要传。Robokit 用最新一份 `robokit_*.log`。`--rds` 用最新一份 `rdscore_*.log`。
+1. `POST /api/sign-in`，正文 `{"username","password"}`。Header：`Accept: application/json, text/plain, */*`、`Content-Type: application/json`、`Pragma: no-cache`。留下响应的 `Set-Cookie`。`--user` 和 `--password` 成对出现。没给账号而下一步返回 401 时，再向用户要。
+2. `POST /api/log-files/download`，超时 1800 秒。上面三个 Header 再加 `Cookie`。正文是 `{"from","to","types"}`。`from` 和 `to` 是 UTC ISO 时间。默认类别是 `system`、`fleet`、`rbk`、`fleet-op`、`scene`、`oke`、`falcon`、`script`。缩小范围用 `--types system,fleet`。响应 JSON 是 `{"path":"tmp/m4-logs-....zip"}`。
+3. `GET /api/files/get/<path>`，Header 是 `Accept: */*` 和同一个 `Cookie`。不要带 `Content-Type` 和 `Pragma`。正文原样存成 zip。默认文件名用 `path` 里的名字。
+
+`--m4` needs `--last` or both `--start` and `--end`. `--last` reads `GET /api/base` and `GET /api/ping` for a timestamp that includes a timezone. The 2026-10-01 server had none, so the window ends at this computer's clock. `--start` and `--end` are local times on this computer and are sent as UTC ISO. Do not combine `--m4` with `--rds`.
+
+`--m4` 必须带 `--last`，或者同时带 `--start` 和 `--end`。`--last` 会读 `GET /api/base` 和 `GET /api/ping`，找带时区的时间。2026-10-01 这台服务器上没有，窗口结束时刻就是运行命令这台电脑的时钟。`--start` 和 `--end` 按这台电脑的本地时间理解，再转成 UTC ISO 发出。不要把 `--m4` 和 `--rds` 一起用。
+
+When the user asks for a recent span (最近 10 分钟, last half hour) of Robokit or RDS logs, pass `--last` and do not compute the window from this computer's clock. `--last 10m` means ten minutes; a bare number is minutes (`--last 10`), and `1h` / `90s` / `0:10:00` also work. `--Last` is the same flag. The tool asks the robot for its clock first (API **5117** `robot_core_datetime_req` → **15117**, empty body, `{"dateTime":"yyyy-MM-dd HH:mm:ss:mmm"}`), then the window ends at that time. For M4, pass `--m4` and follow the M4 clock rule above.
+
+用户说最近一段时间（最近 10 分钟、最近半小时）的 Robokit 或 RDS 日志时，传 `--last`，不要用这台电脑的时钟去算起止。`--last 10m` 是 10 分钟；只写数字就是分钟（`--last 10`），也可以写 `1h`、`90s`、`0:10:00`。`--Last` 是同一个参数。工具会先问机器人当前时间（API **5117** `robot_core_datetime_req` → **15117**，正文为空，返回 `{"dateTime":"yyyy-MM-dd HH:mm:ss:mmm"}`），窗口的结束时刻就是这个时间。M4 要加 `--m4`，时钟按上面的 M4 规则。
+
+Pass `--start` and `--end` together only when the user named an absolute window. Do not combine them with `--last`. Otherwise omit all three for Robokit and RDS. Robokit then uses the newest `robokit_*.log`. `--rds` uses the newest `rdscore_*.log`. `--m4` still needs a window.
+
+只有用户给了绝对起止时间才同时传 `--start` 和 `--end`。不要和 `--last` 一起用。Robokit 和 RDS 都没说的话三个都不要传。Robokit 用最新一份 `robokit_*.log`。`--rds` 用最新一份 `rdscore_*.log`。`--m4` 仍然必须给时间范围。
 
 The tool is the public GitHub repo `rossliscut/download-robot-logs`:
 
