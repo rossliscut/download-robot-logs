@@ -2,14 +2,17 @@ import unittest
 from datetime import datetime, timedelta
 
 from download_robot_logs.select import (
+    chassis_map_stems,
     filter_rotated,
     listed_rhcr,
+    listed_robokit,
     loaded_map_stems,
     map_wanted,
     parse_last,
     parse_robot_datetime,
     rhcr_dir_from_listing,
     rhcr_log_names,
+    robokit_log_names,
     to_rds_zip_rel,
     to_zip_rel,
 )
@@ -106,6 +109,30 @@ class LayoutTest(unittest.TestCase):
         only = ["rhcr/rhcr_2026-09-15_07-21-03_1.log"]
         self.assertEqual(filter_rotated(only, start, end, end), only)
 
+    def test_robokit_missing_from_5130_comes_from_listing(self) -> None:
+        log = "/usr/local/etc/.SeerRobotics/rbk/diagnosis/log"
+        listed = [
+            log + "/warning/robokit_warning_2026-10-07_10-07-54.0.log",
+            log + "/error/robokit_error_2026-10-07_10-07-51.0.log",
+            log + "/trace/rbk+common_2026-10-07_11-26-35.pft.zst",
+        ]
+        self.assertFalse(listed_robokit(listed))
+        self.assertTrue(listed_robokit(listed + [log + "/robokit_2026-10-07_11-21-02.10.log"]))
+        names = robokit_log_names(
+            [
+                {"name": "warning", "is_dir": True},
+                {"name": "robokit_2026-10-07_11-13-52.9.log", "is_dir": False},
+                {"name": "robokit_2026-10-07_11-21-02.10.log", "is_dir": False},
+            ]
+        )
+        self.assertEqual(
+            names, ["robokit_2026-10-07_11-13-52.9.log", "robokit_2026-10-07_11-21-02.10.log"]
+        )
+        rels = ["log/" + name for name in names]
+        start = datetime(2026, 10, 7, 11, 24, 34)
+        end = datetime(2026, 10, 7, 11, 26, 34)
+        self.assertEqual(filter_rotated(rels, start, end, end), ["log/robokit_2026-10-07_11-21-02.10.log"])
+
     def test_rds_hour_log_outside_window_is_dropped(self) -> None:
         rels = [
             "logs/Rds_2026-09-29_09-00-00.log",
@@ -180,6 +207,21 @@ class LayoutTest(unittest.TestCase):
         )
         stems = loaded_map_stems(text)
         self.assertEqual(stems, {"Exol3Dpoints_18September_RemoveDeadEnd"})
+
+    def test_chassis_info_names_current_map(self) -> None:
+        text = "\n".join(
+            [
+                '[261007 112821.359][4866069][R][d] [Text][Chassis Info: {"AXISTRANSLATION":[1.0,0.0,0.0],'
+                '"CURRENT_MAP":"MAP_Rialto_Aug_8","CURRENT_MAP_DETAILS":{"mapName":"MAP_Rialto_Aug_8"},'
+                '"debug:current_map":"MAP_Rialto_Aug_8"}]',
+                '[261007 100000.000][1][R][d] [Text][Chassis Info: {"CURRENT_MAP":"","debug:current_map":"old-3D"}]',
+                '[261007 100000.000][1][R][d] [Text][Chassis Info: {"CURRENT_MAP":""}]',
+                "[261007 100000.000][1][NP][i] [addMapMD5][other.smap|abc]",
+                "[261007 100000.000][1][R][i] [smap][144|other]",
+            ]
+        )
+        self.assertEqual(chassis_map_stems(text), {"MAP_Rialto_Aug_8", "old-3D"})
+        self.assertEqual(chassis_map_stems("[smap][144|other]"), set())
 
     def test_robot_clock_drops_milliseconds(self) -> None:
         self.assertEqual(

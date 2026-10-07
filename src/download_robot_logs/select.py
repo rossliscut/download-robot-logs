@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timedelta
 
@@ -23,6 +24,7 @@ SMAP144 = re.compile(r"\[smap\]\[144\|([^\]|]+)")
 CURRENT = re.compile(r"_currentMap\|([^\s|\]]+)")
 SUCCESS = re.compile(r"\[smap\]\[644\|(\S+) success")
 MAP_PATH = re.compile(r"/maps/(?:tmp/)?([^/\s|\]\"']+)")
+CHASSIS = re.compile(r"\[Chassis Info:\s*(\{.*\})\]\s*$")
 TIME_FMT = "%Y-%m-%d %H:%M:%S"
 ROBOT_CLOCK = re.compile(r"(20\d{2})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})")
 _LAST = re.compile(
@@ -167,6 +169,32 @@ def rhcr_log_names(items: list[dict]) -> list[str]:
     return names
 
 
+def is_robokit_main(name: str) -> bool:
+    return (
+        name.startswith("robokit_")
+        and not name.startswith(("robokit_warning_", "robokit_error_"))
+        and name.endswith(".log")
+    )
+
+
+def listed_robokit(paths: list[str]) -> bool:
+    """True when 5130 already named a main robokit_*.log in the log directory."""
+    prefix = LOG_DIR + "/"
+    for path in paths:
+        full = path.replace("\\", "/")
+        if full.startswith(prefix) and "/" not in full[len(prefix) :] and is_robokit_main(full[len(prefix) :]):
+            return True
+    return False
+
+
+def robokit_log_names(items: list[dict]) -> list[str]:
+    return [
+        str(item.get("name") or "")
+        for item in items
+        if not item.get("is_dir") and is_robokit_main(str(item.get("name") or ""))
+    ]
+
+
 def series_key(rel: str) -> str | None:
     name = rel.rsplit("/", 1)[-1]
     if rel.startswith("log/patlogs/") and name.endswith(".pat"):
@@ -187,12 +215,7 @@ def series_key(rel: str) -> str | None:
         return "rdscore"
     if rel.count("/") == 1 and name.startswith("RobodPro_"):
         return "robod"
-    if (
-        rel.count("/") == 1
-        and name.startswith("robokit_")
-        and not name.startswith(("robokit_warning_", "robokit_error_"))
-        and name.endswith(".log")
-    ):
+    if rel.count("/") == 1 and is_robokit_main(name):
         return "robokit"
     return None
 
@@ -230,6 +253,33 @@ def filter_rotated(
                 continue
             kept.append(rel)
     return kept
+
+
+def chassis_map_stems(text: str) -> set[str]:
+    """Map in use, the way RoboCare reads it.
+
+    RoboCare takes CURRENT_MAP from each [Chassis Info: {...}] JSON, then
+    debug:current_map when that is empty. The value is the stem without .smap.
+    Robokit writes the line about every 33 seconds whether or not the map
+    was reloaded.
+    """
+    stems: set[str] = set()
+    for line in text.splitlines():
+        if "Chassis Info" not in line:
+            continue
+        match = CHASSIS.search(line)
+        if not match:
+            continue
+        try:
+            data = json.loads(match.group(1), strict=False)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        name = data.get("CURRENT_MAP") or data.get("debug:current_map")
+        if isinstance(name, str) and name:
+            stems.add(name)
+    return stems
 
 
 def loaded_map_stems(text: str) -> set[str]:

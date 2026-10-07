@@ -194,15 +194,27 @@ Download `robokit_*.log` before `maps/`. Read those logs, then download only the
 
 先下 `robokit_*.log`，再下 `maps/`。读完这些日志后，只下载其中实际加载过的地图。
 
+5130 only returns `robokit_*.log` segments whose file name time falls inside `startTime`/`endTime`. The segment already open at `startTime` is left out, and for a short `--last` it is often the only one. Always list `.../diagnosis/log` with 5100, add the `robokit_*.log` files 5130 left out, then apply the window rule below. Without that segment the map name can be missing and every map gets downloaded. Seen on `192.168.192.5` on 2026-10-07.
+
+5130 只返回文件名时间落在 `startTime`/`endTime` 之内的 `robokit_*.log`。`startTime` 时已经在写的那一段不会列出来，`--last` 很短时往往只有这一段。所以总是用 5100 列 `.../diagnosis/log`，补上 5130 漏掉的 `robokit_*.log`，再按下面的时间规则筛。少了这一段就可能找不到地图名，结果把全部地图都下了。2026-10-07 在 `192.168.192.5` 上见到。
+
 ## Maps: only the ones the robokit log loaded / 只下载日志里用过的地图
 
 `maps/` is the bulk of the package (about 810 MB raw on the robot checked here, 37 files). Do not download the whole directory.
 
 `maps/` 是包里最大的一块（这台机器人上原始大约 810 MB、37 个文件）。不要整目录都下。
 
-After the plain-text `robokit_*.log`, `log/warning/*.log`, and `log/error/*.log` files are on disk, scan every one of them. The current map is named even when this segment has no load line. Collect the stem (the file name without `.smap` or `.2dlh`):
+After the plain-text `robokit_*.log`, `log/warning/*.log`, and `log/error/*.log` files are on disk, scan every one of them.
 
-`robokit_*.log`、`log/warning/*.log`、`log/error/*.log` 都下到本地后全部扫一遍。这段日志没有重新加载地图时，里面仍然会写出当前地图。记下主干名（去掉 `.smap` 或 `.2dlh`）：
+`robokit_*.log`、`log/warning/*.log`、`log/error/*.log` 都下到本地后全部扫一遍。
+
+First choose maps the way RoboCare does. Robokit writes `[Chassis Info: {...}]` about every 33 seconds, whether or not the map was reloaded. Parse the JSON and take `CURRENT_MAP`; when it is empty, take `debug:current_map`. The value is the stem without `.smap`. Every name from these lines is a map in use. When any Chassis Info line names a map, use only those names and ignore the table below.
+
+先按 RoboCare 的规则选地图。robokit 大约每 33 秒写一行 `[Chassis Info: {...}]`，不管有没有重新加载地图。把 JSON 解析出来，取 `CURRENT_MAP`；它为空时取 `debug:current_map`。值就是不带 `.smap` 的主干名。这些行里出现的每个名字都是用过的地图。只要有一行 Chassis Info 给出了地图名，就只用这些名字，不再看下表。
+
+Only when no Chassis Info line names a map (for example a window under about 33 seconds), fall back to these lines. Collect the stem (the file name without `.smap` or `.2dlh`):
+
+只有一行 Chassis Info 都没给出地图名时（例如窗口不到约 33 秒），才退回下面这些行。记下主干名（去掉 `.smap` 或 `.2dlh`）：
 
 | Line / 日志行 | Example / 例子 | Stem / 主干名 |
 |---------------|----------------|---------------|
@@ -215,9 +227,9 @@ From the 5130 list, download each `maps/` file whose name is `<stem>.smap`, `<st
 
 在 5130 的清单里，下载文件名是 `<主干名>.smap`、`<主干名>.2dlh` 或其他 `<主干名>.<后缀>` 的 `maps/` 文件。正在使用的地图要同时下 `.smap` 和 `.2dlh`。7043 在 14:56 切开的 robokit 分段里没有加载行，warning 日志写的是 `Exol3Dpoints_18September_RemoveDeadEnd`。
 
-Ignore `[addMapMD5]`. That line registers `.smap` files present on the robot at startup, not the map the robot was running. Ignore `uploadMap` names while `_currentMap` stays on another map; those files were uploaded and not loaded. Do not skip `maps/` only because `[smap][144` is absent. If none of these three logs name a map, download every file under `maps/`.
+Ignore `[addMapMD5]`. That line registers `.smap` files present on the robot at startup, not the map the robot was running. Ignore `uploadMap` names while `_currentMap` stays on another map; those files were uploaded and not loaded. Do not skip `maps/` only because `[smap][144` is absent. If neither Chassis Info nor these lines name a map in any of the three logs, download every file under `maps/`.
 
-不要把 `[addMapMD5]` 算进去。那一行只是启动时登记机器人上已有的 `.smap`，不是正在使用的地图。`uploadMap` 里的名字如果 `_currentMap` 仍是另一张地图，表示只上传了、没有加载，也不要下。不能因为没有 `[smap][144` 就跳过 `maps/`。这三类日志里都没有地图名时，把 `maps/` 里的文件全部下载。
+不要把 `[addMapMD5]` 算进去。那一行只是启动时登记机器人上已有的 `.smap`，不是正在使用的地图。`uploadMap` 里的名字如果 `_currentMap` 仍是另一张地图，表示只上传了、没有加载，也不要下。不能因为没有 `[smap][144` 就跳过 `maps/`。三类日志里 Chassis Info 和上表都没有地图名时，把 `maps/` 里的文件全部下载。
 
 ## 3. Store like `robokit-Debug-*.zip` / 按调试包目录存放
 
