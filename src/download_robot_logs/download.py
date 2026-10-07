@@ -16,10 +16,13 @@ from download_robot_logs.select import (
     RDS_APP_LOGS,
     RDS_CORE_LOG,
     RHCR_PARENTS,
+    chassis_map_stems,
     filter_rotated,
     listed_rhcr,
+    listed_robokit,
     rhcr_dir_from_listing,
     rhcr_log_names,
+    robokit_log_names,
     format_time,
     loaded_map_stems,
     parse_robot_datetime,
@@ -174,6 +177,22 @@ def extra_pats(client: RobodClient, paths: list[str]) -> list[str]:
     return []
 
 
+def extra_robokit(client: RobodClient, paths: list[str]) -> list[str]:
+    """5130 leaves out the robokit_*.log that was already open at startTime.
+
+    That segment covers the window and names the map in use, so list the
+    directory and let filter_rotated keep the segments that overlap.
+    """
+    listed = set(paths)
+    extra = [
+        f"{LOG_DIR}/{name}"
+        for name in robokit_log_names(list_dir(client, LOG_DIR))
+        if f"{LOG_DIR}/{name}" not in listed
+    ]
+    _log(f"robokit log in 5130: {'yes' if listed_robokit(paths) else 'no'}, extra from directory {len(extra)}")
+    return extra
+
+
 def newest_rdscore_start(client: RobodClient) -> datetime | None:
     stamps = []
     for item in list_dir(client, RDS_CORE_LOG):
@@ -313,6 +332,7 @@ def download_package(
             paths.extend(extra_rds_logs(client, paths))
             paths.extend(extra_rhcr(client, paths))
         else:
+            paths.extend(extra_robokit(client, paths))
             paths.extend(extra_pats(client, paths))
         jobs = jobs_from_paths(paths, rds)
         rels = [rel for rel, _full in jobs]
@@ -330,12 +350,20 @@ def download_package(
             rest = [item for item in jobs if item not in robokit and item not in maps]
             _log(f"jobs robokit={len(robokit)} maps={len(maps)} other={len(rest)}")
             run_batch(client, root, robokit, "log", failed)
-            stems: set[str] = set()
+            chassis: set[str] = set()
+            loaded: set[str] = set()
             for rel, _full in robokit:
                 path = root / rel
                 if path.is_file():
-                    stems |= loaded_map_stems(path.read_text(encoding="utf-8", errors="replace"))
-            _log("loaded maps " + (", ".join(sorted(stems)) if stems else "(none)"))
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                    chassis |= chassis_map_stems(text)
+                    loaded |= loaded_map_stems(text)
+            if chassis:
+                stems = chassis
+                _log("current map from Chassis Info " + ", ".join(sorted(stems)))
+            else:
+                stems = loaded
+                _log("no Chassis Info map; loaded maps " + (", ".join(sorted(stems)) if stems else "(none)"))
             if stems:
                 chosen = [item for item in maps if map_wanted(item[0].rsplit("/", 1)[-1], stems)]
                 _log(f"maps keep {len(chosen)} skip {len(maps) - len(chosen)}")
